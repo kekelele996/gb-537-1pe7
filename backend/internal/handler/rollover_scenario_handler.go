@@ -111,3 +111,21 @@ func (h *RolloverScenarioHandler) Compare(c *gin.Context) {
 	result, serviceErr := h.service.Compare(c.Request.Context(), id, otherID)
 	respond(c, http.StatusOK, result, serviceErr)
 }
+func (h *RolloverScenarioHandler) Drift(c *gin.Context) {
+	id, err := util.ParseUintParam(c, "id")
+	if err != nil {
+		util.Fail(c, err)
+		return
+	}
+	result, serviceErr := h.service.Drift(c.Request.Context(), id, mustActor(c), util.RequestID(c))
+	respond(c, http.StatusOK, result, serviceErr)
+}
+func (h *RolloverScenarioHandler) Refreeze(c *gin.Context) {
+	id, err := util.ParseUintParam(c, "id")
+	if err != nil {
+		util.Fail(c, err)
+		return
+	}
+	result, serviceErr := h.service.Refreeze(c.Request.Context(), id, mustActor(c), util.RequestID(c))
+	respond(c, http.StatusOK, result, serviceErr)
+}

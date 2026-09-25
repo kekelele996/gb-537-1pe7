@@ -18,6 +18,8 @@ type RolloverScenarioRepository interface {
 	CompleteSimulation(context.Context, uint, map[string]any) (bool, error)
 	Transition(context.Context, uint, string, string, map[string]any) (bool, error)
 	SetReplayVerified(context.Context, uint, bool) error
+	Refreeze(context.Context, uint, []string, map[string]any) (bool, error)
+	MarkHistorical(context.Context, uint, time.Time) (bool, error)
 }
 type rolloverScenarioRepository struct{ db *gorm.DB }
 
@@ -104,4 +106,22 @@ func (r *rolloverScenarioRepository) SetReplayVerified(ctx context.Context, id u
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+func (r *rolloverScenarioRepository) Refreeze(ctx context.Context, id uint, allowedStates []string, updates map[string]any) (bool, error) {
+	updates["scenario_state"] = "draft"
+	updates["historical"] = false
+	updates["historical_at"] = nil
+	updates["updated_at"] = time.Now().UTC()
+	result := scopedDB(ctx, r.db).Model(&model.RolloverScenario{}).Where("id = ? AND scenario_state IN ?", id, allowedStates).Updates(updates)
+	if result.Error != nil {
+		return false, fmt.Errorf("refreeze rollover scenario: %w", result.Error)
+	}
+	return result.RowsAffected == 1, nil
+}
+func (r *rolloverScenarioRepository) MarkHistorical(ctx context.Context, id uint, at time.Time) (bool, error) {
+	result := scopedDB(ctx, r.db).Model(&model.RolloverScenario{}).Where("id = ? AND historical = ?", id, false).Updates(map[string]any{"historical": true, "historical_at": at, "updated_at": time.Now().UTC()})
+	if result.Error != nil {
+		return false, fmt.Errorf("mark rollover scenario historical: %w", result.Error)
+	}
+	return result.RowsAffected == 1, nil
 }

@@ -394,3 +394,32 @@ button, input, textarea, select { letter-spacing: 0; }
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
 
+
+/* Frozen-snapshot drift reconciliation */
+.drift-panel { display: flex; flex-direction: column; gap: 11px; margin-top: 16px; padding: 15px; border: 1px solid var(--mineral-3); background: var(--mineral-0); }
+.drift-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.drift-panel-head h3 { margin-top: 4px; }
+.drift-panel-head small { display: block; margin-top: 4px; color: #6e7a74; font-size: .64rem; }
+.drift-panel-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.drift-change-table { border: 1px solid var(--mineral-3); overflow: auto; }
+.drift-change-table .MuiTableCell-root { font-size: .7rem; padding: 7px 10px; }
+.drift-change-table .MuiTableCell-head { background: #eef2ee; font-weight: 700; color: #48564f; }
+.drift-kind.is-danger { background: #f6e4e1; color: #853935; }
+.drift-kind.is-warning { background: #f5ecd9; color: #7d6025; }
+.drift-kind.is-good { background: #e4f0e8; color: #2f6044; }
+.drift-field-list { display: flex; flex-direction: column; gap: 5px; max-height: 190px; overflow: auto; padding: 9px; border: 1px dashed var(--mineral-3); background: #f4f7f4; }
+.drift-field-row { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(0, 1fr) 18px minmax(0, 1fr); gap: 8px; align-items: center; font-size: .66rem; }
+.drift-field-row span:first-child { color: #536159; overflow-wrap: anywhere; }
+.drift-field-row code { padding: 3px 6px; border-radius: 2px; background: #e7ece7; color: #33433c; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.drift-field-row code:last-child { background: #f3e3df; color: #853935; }
+.drift-arrow { text-align: center; color: #8a978f; }
+.drift-refreeze-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 4px; }
+.drift-refreeze-bar small { color: #6e7a74; font-size: .64rem; line-height: 1.45; }
+.scenario-row-badges { display: flex; align-items: center; gap: 5px; }
+.historical-icon { color: #7d6025 !important; }
+.scenario-title-badges { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.state-badge.scenario-historical { display: inline-flex; align-items: center; gap: 4px; border-color: #c7b178; background: #f6eeda; color: #6f5520; }
+.state-badge.scenario-historical .MuiSvgIcon-root { font-size: .82em; }
+.historical-chip { background: #f6eeda; color: #6f5520; }
+@keyframes cert-spin { to { transform: rotate(360deg); } }
+.spin { animation: cert-spin 1s linear infinite; }

@@ -14,6 +14,8 @@ Open `http://127.0.0.1:18537`. The application is decision support only: it does
 - Validate public certificate chains with Go `crypto/x509` and record the offline result.
 - Model service-to-service dependencies, trust references, ownership, environment, and criticality.
 - Freeze inputs for deterministic rollover simulation, with evidence for time-window path failures.
+- Reconcile the frozen snapshot against current trust anchors, certificate chains, and service dependencies; block drill start when assets have drifted and offer a one-click refreeze back to draft.
+- Keep independently verified scenarios immutable: post-verification asset drift preserves their snapshot and only flags them as historical records.
 - Require an independent reviewer before a scenario can move from `executing` to `verified`.
 - Preserve request IDs, actor identity, before/after snapshots, hashes, algorithm version, and timing in audit records.
 
@@ -68,6 +70,15 @@ Authentication is available through `POST /api/v1/auth/login`. All write endpoin
 - `frontend/src/types/enums/scenario-state.ts`, stores, state badges, and rollover page
 
 Valid scenario transitions are `draft -> simulated -> ready -> executing -> verified`, `executing -> rollback`, and `simulated/ready -> draft`. Invalid transitions return `409`; a creator attempting to verify their own scenario receives `409 REVIEWER_SEPARATION_REQUIRED`. Authorization failures return `403`, and unauthenticated requests return `401`.
+
+## Frozen snapshot drift and refreeze
+
+Assets change after a scenario is frozen: trust anchors are archived or revoked, certificate chains are deprecated or re-validated, and service trust sets and dependency edges are edited. To prevent operators from rehearsing against stale conclusions:
+
+- `GET /api/v1/rollover-scenarios/:id/drift` rebuilds the snapshot from the current assets and reports every added, removed, or modified anchor/chain/service (`drifted`, per-entity `changes`, field-level before/after values, both hashes).
+- When a `ready` scenario has drifted, the `ready -> executing` ("记录演练开始") transition is rejected with `409 FROZEN_SNAPSHOT_DRIFT`; the rollovers page lists the changes and disables the start action.
+- `POST /api/v1/rollover-scenarios/:id/refreeze` rebuilds the snapshot from current assets, clears the old simulation results (affected services, broken paths, path evidence, duration, replay flag, idempotency key, rollback record), and returns the scenario to `draft` for a fresh simulation.
+- Scenarios that already completed independent review (`verified`) are never overwritten: drift keeps their original snapshot and result and only marks them as `historical` (`historical`, `historical_at`). Refreeze is refused for historical scenarios; clone the inputs into a new frozen scenario instead.
 
 ## Configuration and ports
 

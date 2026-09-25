@@ -53,6 +53,8 @@ type RolloverScenarioResponse struct {
 	ReplayVerified       bool                          `json:"replay_verified"`
 	DurationMS           int64                         `json:"duration_ms"`
 	RollbackRecord       string                        `json:"rollback_record"`
+	Historical           bool                          `json:"historical"`
+	HistoricalAt         *time.Time                    `json:"historical_at,omitempty"`
 	CreatedAt            time.Time                     `json:"created_at"`
 	UpdatedAt            time.Time                     `json:"updated_at"`
 }
@@ -61,6 +63,33 @@ type RolloverScenarioListResponse struct {
 	Total int64                      `json:"total"`
 	Page  int                        `json:"page"`
 	Size  int                        `json:"size"`
+}
+
+type ScenarioDriftChange struct {
+	EntityType string   `json:"entity_type"`
+	EntityID   uint     `json:"entity_id"`
+	EntityCode string   `json:"entity_code"`
+	Kind       string   `json:"kind"`
+	Fields     []string `json:"fields"`
+	Before     string   `json:"before,omitempty"`
+	After      string   `json:"after,omitempty"`
+}
+type ScenarioDriftFieldChange struct {
+	Field  string `json:"field"`
+	Before string `json:"before"`
+	After  string `json:"after"`
+}
+type ScenarioDriftResponse struct {
+	ScenarioID    uint                       `json:"scenario_id"`
+	ScenarioState string                     `json:"scenario_state"`
+	Historical    bool                       `json:"historical"`
+	Drifted       bool                       `json:"drifted"`
+	Changes       []ScenarioDriftChange      `json:"changes"`
+	FieldChanges  []ScenarioDriftFieldChange `json:"field_changes"`
+	CheckedAt     time.Time                  `json:"checked_at"`
+	FrozenHash    string                     `json:"frozen_hash"`
+	CurrentHash   string                     `json:"current_hash"`
+	BlockedAction string                     `json:"blocked_action,omitempty"`
 }
 
 func NewRolloverScenarioResponse(scenario model.RolloverScenario, now time.Time) RolloverScenarioResponse {
@@ -72,7 +101,7 @@ func NewRolloverScenarioResponse(scenario model.RolloverScenario, now time.Time)
 	_ = json.Unmarshal([]byte(scenario.AffectedServicesJSON), &affected)
 	_ = json.Unmarshal([]byte(scenario.BrokenPathsJSON), &paths)
 	_ = json.Unmarshal([]byte(scenario.PathEvidenceJSON), &evidence)
-	response := RolloverScenarioResponse{ID: scenario.ID, Name: scenario.Name, OldAnchorID: scenario.OldAnchorID, NewAnchorID: scenario.NewAnchorID, OverlapStart: scenario.OverlapStart, OverlapEnd: scenario.OverlapEnd, CandidateChainIDs: candidateIDs, AlgorithmVersion: scenario.AlgorithmVersion, InputHash: scenario.InputHash, SimulationTime: scenario.SimulationTime, AffectedServicesJSON: affected, BrokenPathsJSON: paths, PathEvidenceJSON: evidence, ScenarioState: scenario.ScenarioState, Explanation: scenario.Explanation, CreatedBy: scenario.CreatedBy, CreatedByName: scenario.CreatedByName, VerifiedBy: scenario.VerifiedBy, VerifiedByName: scenario.VerifiedByName, ReplayVerified: scenario.ReplayVerified, DurationMS: scenario.DurationMS, RollbackRecord: scenario.RollbackRecord, CreatedAt: scenario.CreatedAt, UpdatedAt: scenario.UpdatedAt}
+	response := RolloverScenarioResponse{ID: scenario.ID, Name: scenario.Name, OldAnchorID: scenario.OldAnchorID, NewAnchorID: scenario.NewAnchorID, OverlapStart: scenario.OverlapStart, OverlapEnd: scenario.OverlapEnd, CandidateChainIDs: candidateIDs, AlgorithmVersion: scenario.AlgorithmVersion, InputHash: scenario.InputHash, SimulationTime: scenario.SimulationTime, AffectedServicesJSON: affected, BrokenPathsJSON: paths, PathEvidenceJSON: evidence, ScenarioState: scenario.ScenarioState, Explanation: scenario.Explanation, CreatedBy: scenario.CreatedBy, CreatedByName: scenario.CreatedByName, VerifiedBy: scenario.VerifiedBy, VerifiedByName: scenario.VerifiedByName, ReplayVerified: scenario.ReplayVerified, DurationMS: scenario.DurationMS, RollbackRecord: scenario.RollbackRecord, Historical: scenario.Historical, HistoricalAt: scenario.HistoricalAt, CreatedAt: scenario.CreatedAt, UpdatedAt: scenario.UpdatedAt}
 	if scenario.OldAnchor.ID != 0 {
 		anchor := NewTrustAnchorResponse(scenario.OldAnchor, 0, now)
 		response.OldAnchor = &anchor

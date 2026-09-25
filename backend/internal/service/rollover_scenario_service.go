@@ -189,6 +189,14 @@ func (s *RolloverScenarioService) Transition(ctx context.Context, id uint, reque
 	if !constants.CanTransitionScenario(from, to) {
 		return dto.RolloverScenarioResponse{}, util.NewError(http.StatusConflict, util.CodeStateTransition, "illegal scenario transition from "+scenario.ScenarioState+" to "+request.ToState)
 	}
+	if to == constants.ScenarioExecuting {
+		if scenario.Historical {
+			return dto.RolloverScenarioResponse{}, util.NewError(http.StatusConflict, util.CodeSnapshotDrift, "historical scenarios cannot start a new drill; create a fresh frozen scenario")
+		}
+		if err := s.ensureNoDrift(ctx, scenario); err != nil {
+			return dto.RolloverScenarioResponse{}, err
+		}
+	}
 	if to == constants.ScenarioVerified && !scenario.ReviewerSeparated(actor.UserID) {
 		return dto.RolloverScenarioResponse{}, util.NewError(http.StatusConflict, util.CodeReviewerConflict, "scenario creator cannot verify their own simulation")
 	}

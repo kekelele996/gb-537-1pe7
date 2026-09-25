@@ -60,8 +60,39 @@ export interface RolloverScenario {
   replay_verified: boolean
   duration_ms: number
   rollback_record: string
+  historical: boolean
+  historical_at?: string
   created_at: string
   updated_at: string
+}
+
+export interface ScenarioDriftChange {
+  entity_type: 'trust_anchor' | 'certificate_chain' | 'dependent_service'
+  entity_id: number
+  entity_code: string
+  kind: 'added' | 'removed' | 'modified'
+  fields: string[]
+  before?: string
+  after?: string
+}
+
+export interface ScenarioDriftFieldChange {
+  field: string
+  before: string
+  after: string
+}
+
+export interface ScenarioDrift {
+  scenario_id: number
+  scenario_state: ScenarioState
+  historical: boolean
+  drifted: boolean
+  changes: ScenarioDriftChange[]
+  field_changes: ScenarioDriftFieldChange[]
+  checked_at: string
+  frozen_hash: string
+  current_hash: string
+  blocked_action?: string
 }
 
 export interface CreateRolloverScenarioInput {

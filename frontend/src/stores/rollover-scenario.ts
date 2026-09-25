@@ -16,6 +16,7 @@ interface RolloverScenarioState {
   simulate: (id: number, key: string) => Promise<RolloverScenario>
   transition: (id: number, state: ScenarioState, comment?: string) => Promise<RolloverScenario>
   replay: (id: number) => Promise<RolloverScenario>
+  refreeze: (id: number) => Promise<RolloverScenario>
   select: (scenario: RolloverScenario | null) => void
 }
 
@@ -30,7 +31,12 @@ export const useRolloverScenarioStore = create<RolloverScenarioState>((set, get)
       set({ status: 'loading', error: '' })
       try {
         const result = await rolloverScenarioApi.list(query)
-        set({ items: result.items, total: result.total, status: 'ready' })
+        set((state) => ({
+          items: result.items,
+          total: result.total,
+          status: 'ready',
+          active: state.active ? result.items.find((item) => item.id === state.active?.id) ?? null : state.active,
+        }))
       } catch (error) { set({ status: 'error', error: errorMessage(error) }) }
     },
     createScenario: async (input) => {
@@ -41,7 +47,7 @@ export const useRolloverScenarioStore = create<RolloverScenarioState>((set, get)
     simulate: async (id, key) => { const updated = await rolloverScenarioApi.simulate(id, key); merge(updated); return updated },
     transition: async (id, state, comment) => { const updated = await rolloverScenarioApi.transition(id, state, comment); merge(updated); return updated },
     replay: async (id) => { const updated = await rolloverScenarioApi.replay(id); merge(updated); return updated },
+    refreeze: async (id) => { const updated = await rolloverScenarioApi.refreeze(id); merge(updated); return updated },
     select: (scenario) => set({ active: scenario }),
   }
 })
-

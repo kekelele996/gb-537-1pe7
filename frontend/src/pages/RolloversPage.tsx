@@ -1,8 +1,9 @@
-import { AddRounded, ArrowForwardRounded, AutorenewRounded, FactCheckRounded, KeyboardArrowRightRounded, PlayArrowRounded, RefreshRounded, ReplayRounded, RouteRounded, ScienceRounded } from '@mui/icons-material'
-import { Alert, Box, Button, Checkbox, FormControl, IconButton, InputLabel, ListItemText, MenuItem, Select, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from '@mui/material'
+import { AddRounded, ArrowForwardRounded, AutorenewRounded, FactCheckRounded, HistoryToggleOffRounded, KeyboardArrowRightRounded, PlayArrowRounded, RefreshRounded, ReplayRounded, RouteRounded, ScienceRounded } from '@mui/icons-material'
+import { Alert, Box, Button, Checkbox, FormControl, IconButton, InputLabel, ListItemText, MenuItem, Select, TextField, Tooltip, Typography } from '@mui/material'
 import { FormEvent, useEffect, useState } from 'react'
-import { errorMessage } from '../api/client'
+import { ApiError, errorMessage } from '../api/client'
 import { DependencyGraph } from '../components/common/DependencyGraph'
+import { DriftPanel } from '../components/common/DriftPanel'
 import { EmptyState, ErrorState, LoadingState } from '../components/common/DataState'
 import { Fingerprint } from '../components/common/Fingerprint'
 import { FormDrawer } from '../components/common/FormDrawer'
@@ -12,6 +13,7 @@ import { StatStrip } from '../components/common/StatStrip'
 import { ValidationEvidenceDrawer } from '../components/common/ValidationEvidenceDrawer'
 import { useAuth } from '../hooks/useAuth'
 import { useRolloverSimulation } from '../hooks/useRolloverSimulation'
+import { useScenarioDrift } from '../hooks/useScenarioDrift'
 import { useCertificateChainStore } from '../stores/certificate-chain'
 import { useDependentServiceStore } from '../stores/dependent-service'
 import { useRolloverScenarioStore } from '../stores/rollover-scenario'
@@ -34,18 +36,20 @@ const transitionCopy: Partial<Record<ScenarioState, { to: ScenarioState; label: 
 }
 
 export function RolloversPage() {
-  const { items, total, status, error, active, fetchScenarios, createScenario, transition, replay, select } = useRolloverScenarioStore()
+  const { items, total, status, error, active, fetchScenarios, createScenario, transition, replay, refreeze, select } = useRolloverScenarioStore()
   const { items: anchors, fetchAnchors } = useTrustAnchorStore()
   const { items: chains, fetchChains } = useCertificateChainStore()
   const { items: services, fetchServices } = useDependentServiceStore()
   const { can, user } = useAuth()
   const simulation = useRolloverSimulation()
+  const drift = useScenarioDrift(active?.id)
   const [createOpen, setCreateOpen] = useState(false)
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [form, setForm] = useState<CreateRolloverScenarioInput>(defaultScenario)
   const [feedback, setFeedback] = useState('')
   const [success, setSuccess] = useState('')
   const [busy, setBusy] = useState(false)
+  const [refreezing, setRefreezing] = useState(false)
 
   useEffect(() => { void fetchScenarios(); void fetchAnchors(); void fetchChains(); void fetchServices() }, [fetchAnchors, fetchChains, fetchScenarios, fetchServices])
   useEffect(() => { if (!active && items.length) select(items[0]) }, [active, items, select])
@@ -72,17 +76,40 @@ export function RolloversPage() {
   }
   const transitionActive = async (to: ScenarioState) => {
     if (!active) return; setBusy(true); setFeedback(''); setSuccess('')
-    try { const updated = await transition(active.id, to); setSuccess(`场景状态已更新为 ${updated.scenario_state}。`) }
-    catch (cause) { setFeedback(errorMessage(cause)) } finally { setBusy(false) }
+    try {
+      const updated = await transition(active.id, to)
+      setSuccess(`场景状态已更新为 ${updated.scenario_state}。`)
+      if (to === 'executing') void drift.refresh()
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.code === 'FROZEN_SNAPSHOT_DRIFT') {
+        await drift.refresh()
+      }
+      setFeedback(errorMessage(cause))
+    } finally { setBusy(false) }
   }
   const replayActive = async () => {
     if (!active) return; setBusy(true); setFeedback(''); setSuccess('')
     try { const updated = await replay(active.id); setSuccess(updated.replay_verified ? '重放结果与冻结历史证据一致。' : '重放结果不一致。') }
     catch (cause) { setFeedback(errorMessage(cause)) } finally { setBusy(false) }
   }
+  const refreezeActive = async () => {
+    if (!active) return
+    setFeedback(''); setSuccess('')
+    setRefreezing(true)
+    try {
+      const updated = await refreeze(active.id)
+      setSuccess(`已按当前资产重新冻结 ${updated.name}，旧推演结果已清空，场景回到草稿，请重新运行推演。`)
+      await drift.refresh()
+    } catch (cause) {
+      setFeedback(errorMessage(cause))
+      throw cause
+    } finally { setRefreezing(false) }
+  }
 
   const next = active ? transitionCopy[active.scenario_state] : undefined
+  const driftBlocksStart = !!active && active.scenario_state === 'ready' && drift.report?.drifted === true && !active.historical
   const canAdvance = next && ((next.to === 'verified' && can('scenario.verify')) || (next.to !== 'verified' && can('scenario.write')))
+  const advanceBlockedByDrift = next?.to === 'executing' && driftBlocksStart
   const reviewerConflict = active?.scenario_state === 'executing' && active.created_by === user?.user_id
 
   return <Box className="page-shell rollover-page">
@@ -93,17 +120,19 @@ export function RolloversPage() {
       <section className="scenario-rail">
         <Box className="section-title compact"><Box><Typography className="eyebrow">SCENARIO REGISTER</Typography><Typography variant="h2">冻结场景</Typography></Box><span>{items.length}</span></Box>
         {status === 'loading' && <LoadingState />}{status === 'error' && <ErrorState message={error} retry={() => fetchScenarios()} />}{status === 'ready' && !items.length && <EmptyState title="还没有轮换场景" detail="冻结锚点、证书链和服务图后才能运行推演。" />}
-        <Box className="scenario-list">{items.map((scenario) => <Button className={active?.id === scenario.id ? 'scenario-row selected' : 'scenario-row'} key={scenario.id} onClick={() => select(scenario)}><Box><Typography component="strong">{scenario.name}</Typography><Typography>{formatDateTime(scenario.simulation_time)}</Typography></Box><Box><ScenarioStateBadge state={scenario.scenario_state} /><KeyboardArrowRightRounded /></Box></Button>)}</Box>
+        <Box className="scenario-list">{items.map((scenario) => <Button className={active?.id === scenario.id ? 'scenario-row selected' : 'scenario-row'} key={scenario.id} onClick={() => select(scenario)}><Box><Typography component="strong">{scenario.name}</Typography><Typography>{formatDateTime(scenario.simulation_time)}</Typography></Box><Box className="scenario-row-badges">{scenario.historical && <Tooltip title="已独立复核 · 资产已变化，仅作历史记录"><HistoryToggleOffRounded className="historical-icon" fontSize="small" /></Tooltip>}<ScenarioStateBadge state={scenario.scenario_state} /></Box><KeyboardArrowRightRounded /></Button>)}</Box>
       </section>
       <section className="scenario-detail">
         {active ? <>
-          <Box className="scenario-title"><Box><Typography className="eyebrow">SCENARIO #{active.id} · {active.algorithm_version}</Typography><Typography variant="h2">{active.name}</Typography><Typography>由 {active.created_by_name} 创建 · {formatDateTime(active.created_at)}</Typography></Box><ScenarioStateBadge state={active.scenario_state} /></Box>
+          <Box className="scenario-title"><Box><Typography className="eyebrow">SCENARIO #{active.id} · {active.algorithm_version}</Typography><Typography variant="h2">{active.name}</Typography><Typography>由 {active.created_by_name} 创建 · {formatDateTime(active.created_at)}</Typography></Box><Box className="scenario-title-badges">{active.historical && <span className="state-badge scenario-historical"><HistoryToggleOffRounded fontSize="inherit" />历史记录</span>}<ScenarioStateBadge state={active.scenario_state} /></Box></Box>
+          {active.historical && <Alert severity="info" icon={<HistoryToggleOffRounded fontSize="inherit" />}>该场景已完成独立复核；冻结后信任资产发生过变化。原快照与推演结果保留为历史记录，不可重新冻结或进入新演练，请基于当前资产新建冻结场景。</Alert>}
+          {active.scenario_state !== 'draft' && <DriftPanel report={drift.report} loading={drift.loading} error={drift.error} checkedAt={drift.checkedAt} historical={active.historical} canRefreeze={can('scenario.write')} onRefresh={drift.refresh} onRefreeze={refreezeActive} refreezing={refreezing} />}
           <Box className="anchor-transition"><Box><span>旧信任锚</span><strong>{active.old_anchor?.anchor_code ?? `#${active.old_anchor_id}`}</strong><small>{active.old_anchor?.fingerprint_sha256 && <Fingerprint value={active.old_anchor.fingerprint_sha256} compact />}</small></Box><Box className="transition-axis"><ArrowForwardRounded /><span>{formatDateTime(active.overlap_start)}<br />至 {formatDateTime(active.overlap_end)}</span></Box><Box><span>新信任锚</span><strong>{active.new_anchor?.anchor_code ?? `#${active.new_anchor_id}`}</strong><small>{active.new_anchor?.fingerprint_sha256 && <Fingerprint value={active.new_anchor.fingerprint_sha256} compact />}</small></Box></Box>
           <Box className="scenario-evidence-grid"><Box><Typography className="eyebrow">SIMULATION TIME</Typography><strong>{formatDateTime(active.simulation_time)}</strong><span>耗时 {active.duration_ms} ms</span></Box><Box><Typography className="eyebrow">INPUT HASH</Typography><Fingerprint value={active.input_hash} compact /></Box><Box className={active.broken_paths_json.length ? 'is-risk' : 'is-pass'}><Typography className="eyebrow">BROKEN PATHS</Typography><strong>{active.broken_paths_json.length}</strong><span>{active.affected_services_json.length} 个受影响服务</span></Box></Box>
           <Box className="simulation-explanation"><ScienceRounded /><Typography>{active.explanation}</Typography></Box>
           <Box className="scenario-toolbar">
             {active.scenario_state === 'draft' && can('scenario.run') && <Button variant="contained" startIcon={<PlayArrowRounded />} disabled={simulation.runningId === active.id} onClick={() => runSimulation(active)}>{simulation.runningId === active.id ? '正在推演…' : '运行离线推演'}</Button>}
-            {canAdvance && !reviewerConflict && <Button variant="contained" startIcon={next?.to === 'verified' ? <FactCheckRounded /> : <ArrowForwardRounded />} disabled={busy} onClick={() => next && transitionActive(next.to)}>{next?.label}</Button>}
+            {canAdvance && !reviewerConflict && <Tooltip title={advanceBlockedByDrift ? '冻结资产已变化，请先按当前资产重新冻结' : ''} placement="top"><span><Button variant="contained" startIcon={next?.to === 'verified' ? <FactCheckRounded /> : <ArrowForwardRounded />} disabled={busy || advanceBlockedByDrift} onClick={() => next && transitionActive(next.to)}>{next?.label}</Button></span></Tooltip>}
             {active.scenario_state !== 'draft' && can('scenario.run') && <Button variant="outlined" startIcon={<ReplayRounded />} disabled={busy} onClick={replayActive}>重放一致性</Button>}
             {!!active.path_evidence_json.length && <Button variant="outlined" startIcon={<RouteRounded />} onClick={() => setEvidenceOpen(true)}>逐路径证据</Button>}
             {active.scenario_state === 'executing' && can('scenario.write') && <Button color="error" variant="text" startIcon={<AutorenewRounded />} onClick={() => transitionActive('rollback')}>记录回滚</Button>}
