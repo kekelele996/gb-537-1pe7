@@ -14,6 +14,7 @@ Open `http://127.0.0.1:18537`. The application is decision support only: it does
 - Validate public certificate chains with Go `crypto/x509` and record the offline result.
 - Model service-to-service dependencies, trust references, ownership, environment, and criticality.
 - Freeze inputs for deterministic rollover simulation, with evidence for time-window path failures.
+- Detect post-freeze asset drift (anchors, chains, service dependencies) before a drill starts, and re-freeze from current assets while verified scenarios stay untouched as historical records.
 - Require an independent reviewer before a scenario can move from `executing` to `verified`.
 - Preserve request IDs, actor identity, before/after snapshots, hashes, algorithm version, and timing in audit records.
 
@@ -48,7 +49,7 @@ The principal model is `TrustAnchor -> CertificateChain -> DependentService -> d
 | `/anchors` | `/trust-anchors`, `/certificate-chains` | Inspect trust-anchor fingerprints, validity, and chain references |
 | `/chains` | `/certificate-chains`, `/trust-anchors`, `/dependent-services` | Review chain structure and offline validation |
 | `/dependencies` | `/dependent-services`, `/certificate-chains` | Maintain dependency edges and find cycles |
-| `/rollovers` | `/rollover-scenarios` and all core resources | Run, compare, replay, and transition frozen simulations |
+| `/rollovers` | `/rollover-scenarios` and all core resources | Run, compare, replay, transition, drift-check, and re-freeze frozen simulations |
 | `/audit` | `/audit-logs` and entity projections | Filter audit evidence by request, actor, entity, and time |
 
 Authentication is available through `POST /api/v1/auth/login`. All write endpoints produce an audit record. Simulation requests require an `Idempotency-Key`; repeated requests with the same key return the stored result.
@@ -68,6 +69,8 @@ Authentication is available through `POST /api/v1/auth/login`. All write endpoin
 - `frontend/src/types/enums/scenario-state.ts`, stores, state badges, and rollover page
 
 Valid scenario transitions are `draft -> simulated -> ready -> executing -> verified`, `executing -> rollback`, and `simulated/ready -> draft`. Invalid transitions return `409`; a creator attempting to verify their own scenario receives `409 REVIEWER_SEPARATION_REQUIRED`. Authorization failures return `403`, and unauthenticated requests return `401`.
+
+Frozen inputs can go stale when the asset team changes anchors, chains, or service dependencies after the freeze. `GET /api/v1/rollover-scenarios/:id/drift` reassembles the current assets and lists every changed item against the frozen snapshot. While drift exists, the `ready -> executing` transition (recording drill start) is rejected with `409 SNAPSHOT_DRIFT_DETECTED`. `POST /api/v1/rollover-scenarios/:id/refreeze` re-freezes the scenario from the current assets: stored simulation results are cleared, the bound idempotency key is released, and the scenario returns to `draft`. A `verified` scenario keeps its original snapshot as a historical record — drift is reported as informational only and re-freezing returns `409 HISTORICAL_RECORD_LOCKED`.
 
 ## Configuration and ports
 

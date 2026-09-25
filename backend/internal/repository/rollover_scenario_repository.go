@@ -17,6 +17,7 @@ type RolloverScenarioRepository interface {
 	FindByInput(context.Context, string, string, time.Time) (model.RolloverScenario, error)
 	CompleteSimulation(context.Context, uint, map[string]any) (bool, error)
 	Transition(context.Context, uint, string, string, map[string]any) (bool, error)
+	Refreeze(context.Context, uint, map[string]any) (bool, error)
 	SetReplayVerified(context.Context, uint, bool) error
 }
 type rolloverScenarioRepository struct{ db *gorm.DB }
@@ -92,6 +93,19 @@ func (r *rolloverScenarioRepository) Transition(ctx context.Context, id uint, fr
 	result := scopedDB(ctx, r.db).Model(&model.RolloverScenario{}).Where("id = ? AND scenario_state = ?", id, from).Updates(updates)
 	if result.Error != nil {
 		return false, fmt.Errorf("transition rollover scenario: %w", result.Error)
+	}
+	return result.RowsAffected == 1, nil
+}
+
+// Refreeze replaces the frozen input and clears stored simulation results,
+// but only while the scenario has not been independently verified; verified
+// scenarios keep their original snapshot as historical records.
+func (r *rolloverScenarioRepository) Refreeze(ctx context.Context, id uint, updates map[string]any) (bool, error) {
+	updates["scenario_state"] = "draft"
+	updates["updated_at"] = time.Now().UTC()
+	result := scopedDB(ctx, r.db).Model(&model.RolloverScenario{}).Where("id = ? AND scenario_state <> ?", id, "verified").Updates(updates)
+	if result.Error != nil {
+		return false, fmt.Errorf("refreeze rollover scenario: %w", result.Error)
 	}
 	return result.RowsAffected == 1, nil
 }

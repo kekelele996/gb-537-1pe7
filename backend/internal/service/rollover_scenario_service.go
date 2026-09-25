@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"gorm.io/gorm"
 	"net/http"
 	"pki-certificate-rollover-impact/backend/internal/algorithm"
@@ -142,7 +143,7 @@ func (s *RolloverScenarioService) Simulate(ctx context.Context, id uint, idempot
 		scenario.PathEvidenceJSON = evidenceJSON
 		scenario.Explanation = result.Explanation
 		scenario.DurationMS = duration
-		scenario.IdempotencyKey = idempotencyKey
+		scenario.IdempotencyKey = &idempotencyKey
 		return recordAudit(txCtx, s.audits, actor, requestID, "rollover_scenario", id, "simulate", before, scenario, scenario.InputHash, scenario.AlgorithmVersion, &scenario.SimulationTime, duration, result.Explanation)
 	})
 	if err != nil {
@@ -192,6 +193,15 @@ func (s *RolloverScenarioService) Transition(ctx context.Context, id uint, reque
 	if to == constants.ScenarioVerified && !scenario.ReviewerSeparated(actor.UserID) {
 		return dto.RolloverScenarioResponse{}, util.NewError(http.StatusConflict, util.CodeReviewerConflict, "scenario creator cannot verify their own simulation")
 	}
+	if to == constants.ScenarioExecuting {
+		changes, _, driftErr := s.computeDrift(ctx, scenario)
+		if driftErr != nil {
+			return dto.RolloverScenarioResponse{}, driftErr
+		}
+		if len(changes) > 0 {
+			return dto.RolloverScenarioResponse{}, util.NewError(http.StatusConflict, util.CodeSnapshotDrift, fmt.Sprintf("frozen snapshot no longer matches current assets (%d change(s)); re-freeze the scenario before recording drill start", len(changes)))
+		}
+	}
 	updates := map[string]any{}
 	if to == constants.ScenarioVerified {
 		updates["verified_by"] = actor.UserID
@@ -218,6 +228,123 @@ func (s *RolloverScenarioService) Transition(ctx context.Context, id uint, reque
 			scenario.RollbackRecord = strings.TrimSpace(request.Comment)
 		}
 		return recordAudit(txCtx, s.audits, actor, requestID, "rollover_scenario", id, "transition", before, scenario, scenario.InputHash, scenario.AlgorithmVersion, &scenario.SimulationTime, 0, request.Comment)
+	})
+	if err != nil {
+		return dto.RolloverScenarioResponse{}, err
+	}
+	return s.Get(ctx, id)
+}
+func (s *RolloverScenarioService) CheckDrift(ctx context.Context, id uint) (dto.SnapshotDriftResponse, error) {
+	scenario, err := s.scenarios.GetByID(ctx, id, false)
+	if err != nil {
+		return dto.SnapshotDriftResponse{}, util.NotFound("rollover scenario")
+	}
+	changes, currentHash, err := s.computeDrift(ctx, scenario)
+	if err != nil {
+		return dto.SnapshotDriftResponse{}, err
+	}
+	return dto.SnapshotDriftResponse{ScenarioID: scenario.ID, ScenarioState: scenario.ScenarioState, Historical: scenario.ScenarioState == string(constants.ScenarioVerified), Changed: len(changes) > 0, FrozenHash: scenario.InputHash, CurrentHash: currentHash, Changes: changes, CheckedAt: s.now()}, nil
+}
+
+// computeDrift reassembles the scenario input from the currently stored
+// anchors, chains, and services, then diffs it against the frozen snapshot.
+func (s *RolloverScenarioService) computeDrift(ctx context.Context, scenario model.RolloverScenario) ([]algorithm.DriftItem, string, error) {
+	frozen, err := algorithm.DecodeSnapshot(scenario.InputSnapshot)
+	if err != nil {
+		return nil, "", util.WrapError(http.StatusUnprocessableEntity, util.CodeValidation, "frozen scenario snapshot is invalid", err)
+	}
+	candidateIDs, err := decodeUintList(scenario.CandidateChainIDs)
+	if err != nil {
+		return nil, "", util.WrapError(http.StatusUnprocessableEntity, util.CodeValidation, "frozen candidate chain list is invalid", err)
+	}
+	anchors, err := s.anchors.GetByIDs(ctx, uniqueIDs([]uint{scenario.OldAnchorID, scenario.NewAnchorID}))
+	if err != nil {
+		return nil, "", util.WrapError(http.StatusInternalServerError, util.CodeInternal, "unable to load current trust anchors", err)
+	}
+	allChains, _, err := s.chains.List(ctx, dto.CertificateChainQuery{Page: 1, PageSize: 200})
+	if err != nil {
+		return nil, "", util.WrapError(http.StatusInternalServerError, util.CodeInternal, "unable to load current certificate chains", err)
+	}
+	allServices, err := s.services.All(ctx)
+	if err != nil {
+		return nil, "", util.WrapError(http.StatusInternalServerError, util.CodeInternal, "unable to load current dependency graph", err)
+	}
+	current, err := assembleSnapshot(scenario.Name, scenario.OldAnchorID, scenario.NewAnchorID, scenario.OverlapStart, scenario.OverlapEnd, scenario.SimulationTime, candidateIDs, anchors, allChains, allServices)
+	if err != nil {
+		return nil, "", util.WrapError(http.StatusUnprocessableEntity, util.CodeValidation, "current assets cannot be assembled into a snapshot", err)
+	}
+	currentHash, err := current.Hash()
+	if err != nil {
+		return nil, "", util.WrapError(http.StatusInternalServerError, util.CodeInternal, "unable to hash current assets", err)
+	}
+	if currentHash == scenario.InputHash {
+		return []algorithm.DriftItem{}, currentHash, nil
+	}
+	return algorithm.DiffSnapshots(frozen, current), currentHash, nil
+}
+
+// Refreeze replaces the frozen input with the current assets, clears the
+// stored simulation results, and moves the scenario back to draft. Verified
+// scenarios are historical records and keep their original snapshot.
+func (s *RolloverScenarioService) Refreeze(ctx context.Context, id uint, actor util.Actor, requestID string) (dto.RolloverScenarioResponse, error) {
+	scenario, err := s.scenarios.GetByID(ctx, id, false)
+	if err != nil {
+		return dto.RolloverScenarioResponse{}, util.NotFound("rollover scenario")
+	}
+	if err := requireScenarioOwnership(actor, scenario); err != nil {
+		return dto.RolloverScenarioResponse{}, err
+	}
+	if scenario.ScenarioState == string(constants.ScenarioVerified) {
+		return dto.RolloverScenarioResponse{}, util.NewError(http.StatusConflict, util.CodeHistoricalRecord, "verified scenarios are preserved as historical records and cannot be re-frozen")
+	}
+	candidateIDs, err := decodeUintList(scenario.CandidateChainIDs)
+	if err != nil {
+		return dto.RolloverScenarioResponse{}, util.WrapError(http.StatusUnprocessableEntity, util.CodeValidation, "frozen candidate chain list is invalid", err)
+	}
+	anchors, err := s.anchors.GetByIDs(ctx, uniqueIDs([]uint{scenario.OldAnchorID, scenario.NewAnchorID}))
+	if err != nil || len(anchors) != 2 {
+		return dto.RolloverScenarioResponse{}, util.NewError(http.StatusUnprocessableEntity, util.CodeValidation, "scenario trust anchors are missing; current assets cannot be frozen")
+	}
+	allChains, _, err := s.chains.List(ctx, dto.CertificateChainQuery{Page: 1, PageSize: 200})
+	if err != nil {
+		return dto.RolloverScenarioResponse{}, util.WrapError(http.StatusInternalServerError, util.CodeInternal, "unable to load current certificate chains", err)
+	}
+	allServices, err := s.services.All(ctx)
+	if err != nil {
+		return dto.RolloverScenarioResponse{}, util.WrapError(http.StatusInternalServerError, util.CodeInternal, "unable to load current dependency graph", err)
+	}
+	snapshot, err := buildSnapshot(scenario.Name, scenario.OldAnchorID, scenario.NewAnchorID, scenario.OverlapStart, scenario.OverlapEnd, scenario.SimulationTime, candidateIDs, anchors, allChains, allServices)
+	if err != nil {
+		return dto.RolloverScenarioResponse{}, util.WrapError(http.StatusUnprocessableEntity, util.CodeValidation, "current assets cannot be frozen", err)
+	}
+	inputHash, err := snapshot.Hash()
+	if err != nil {
+		return dto.RolloverScenarioResponse{}, util.WrapError(http.StatusInternalServerError, util.CodeInternal, "unable to hash frozen input", err)
+	}
+	snapshotJSON, _ := snapshot.Canonical()
+	before := scenario
+	updates := map[string]any{"input_hash": inputHash, "input_snapshot": snapshotJSON, "algorithm_version": algorithm.Version, "affected_services_json": "[]", "broken_paths_json": "[]", "path_evidence_json": "[]", "explanation": "Frozen input was refreshed from current assets; previous simulation results were cleared.", "duration_ms": 0, "replay_verified": false, "idempotency_key": nil, "rollback_record": ""}
+	err = s.transactions.WithinTransaction(ctx, func(txCtx context.Context) error {
+		changed, refreezeErr := s.scenarios.Refreeze(txCtx, id, updates)
+		if refreezeErr != nil {
+			return refreezeErr
+		}
+		if !changed {
+			return util.NewError(http.StatusConflict, util.CodeConflict, "scenario state changed concurrently")
+		}
+		scenario.InputHash = inputHash
+		scenario.InputSnapshot = snapshotJSON
+		scenario.AlgorithmVersion = algorithm.Version
+		scenario.AffectedServicesJSON = "[]"
+		scenario.BrokenPathsJSON = "[]"
+		scenario.PathEvidenceJSON = "[]"
+		scenario.Explanation = updates["explanation"].(string)
+		scenario.DurationMS = 0
+		scenario.ReplayVerified = false
+		scenario.IdempotencyKey = nil
+		scenario.RollbackRecord = ""
+		scenario.ScenarioState = string(constants.ScenarioDraft)
+		return recordAudit(txCtx, s.audits, actor, requestID, "rollover_scenario", id, "refreeze", before, scenario, inputHash, algorithm.Version, &scenario.SimulationTime, 0, "re-frozen from current assets; previous simulation results cleared and scenario returned to draft")
 	})
 	if err != nil {
 		return dto.RolloverScenarioResponse{}, err

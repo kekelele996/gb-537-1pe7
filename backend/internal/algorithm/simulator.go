@@ -373,3 +373,211 @@ func mapKeys(values map[uint]bool) []uint {
 	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
 	return result
 }
+
+const (
+	DriftAdded    = "added"
+	DriftRemoved  = "removed"
+	DriftModified = "modified"
+)
+
+const (
+	DriftAlgorithm = "algorithm"
+	DriftAnchor    = "trust_anchor"
+	DriftChain     = "certificate_chain"
+	DriftService   = "dependent_service"
+)
+
+// DriftItem describes one difference between a frozen rollover snapshot and
+// the currently stored trust anchors, certificate chains, and services.
+type DriftItem struct {
+	EntityType string `json:"entity_type"`
+	EntityID   uint   `json:"entity_id,omitempty"`
+	Code       string `json:"code"`
+	Change     string `json:"change"`
+	Detail     string `json:"detail"`
+}
+
+// DiffSnapshots compares a frozen snapshot with a freshly assembled snapshot
+// of the current assets and lists every changed item in a deterministic order.
+func DiffSnapshots(frozen, current Snapshot) []DriftItem {
+	items := []DriftItem{}
+	if frozen.AlgorithmVersion != current.AlgorithmVersion {
+		items = append(items, DriftItem{EntityType: DriftAlgorithm, Code: "algorithm_version", Change: DriftModified, Detail: frozen.AlgorithmVersion + " -> " + current.AlgorithmVersion})
+	}
+	items = append(items, diffAnchors(frozen.Anchors, current.Anchors)...)
+	items = append(items, diffChains(frozen.Chains, current.Chains)...)
+	items = append(items, diffServices(frozen.Services, current.Services)...)
+	sort.SliceStable(items, func(i, j int) bool {
+		left, right := entityRank(items[i].EntityType), entityRank(items[j].EntityType)
+		if left != right {
+			return left < right
+		}
+		if items[i].EntityID != items[j].EntityID {
+			return items[i].EntityID < items[j].EntityID
+		}
+		return items[i].Change < items[j].Change
+	})
+	return items
+}
+
+func entityRank(entityType string) int {
+	switch entityType {
+	case DriftAlgorithm:
+		return 0
+	case DriftAnchor:
+		return 1
+	case DriftChain:
+		return 2
+	case DriftService:
+		return 3
+	}
+	return 4
+}
+
+func diffAnchors(frozen, current []AnchorSnapshot) []DriftItem {
+	items := []DriftItem{}
+	currentByID := map[uint]AnchorSnapshot{}
+	for _, anchor := range current {
+		currentByID[anchor.ID] = anchor
+	}
+	frozenByID := map[uint]AnchorSnapshot{}
+	for _, anchor := range frozen {
+		frozenByID[anchor.ID] = anchor
+		now, exists := currentByID[anchor.ID]
+		if !exists {
+			items = append(items, DriftItem{EntityType: DriftAnchor, EntityID: anchor.ID, Code: anchor.Code, Change: DriftRemoved, Detail: "trust anchor is no longer present"})
+			continue
+		}
+		details := []string{}
+		if anchor.State != now.State {
+			details = append(details, "certificate_state "+anchor.State+" -> "+now.State)
+		}
+		if anchor.Revoked != now.Revoked {
+			details = append(details, fmt.Sprintf("revoked %t -> %t", anchor.Revoked, now.Revoked))
+		}
+		if !anchor.NotBefore.Equal(now.NotBefore) {
+			details = append(details, "not_before "+formatTime(anchor.NotBefore)+" -> "+formatTime(now.NotBefore))
+		}
+		if !anchor.NotAfter.Equal(now.NotAfter) {
+			details = append(details, "not_after "+formatTime(anchor.NotAfter)+" -> "+formatTime(now.NotAfter))
+		}
+		if len(details) > 0 {
+			items = append(items, DriftItem{EntityType: DriftAnchor, EntityID: anchor.ID, Code: anchor.Code, Change: DriftModified, Detail: strings.Join(details, "; ")})
+		}
+	}
+	for _, anchor := range current {
+		if _, exists := frozenByID[anchor.ID]; !exists {
+			items = append(items, DriftItem{EntityType: DriftAnchor, EntityID: anchor.ID, Code: anchor.Code, Change: DriftAdded, Detail: "trust anchor was added after the snapshot was frozen"})
+		}
+	}
+	return items
+}
+
+func diffChains(frozen, current []ChainSnapshot) []DriftItem {
+	items := []DriftItem{}
+	currentByID := map[uint]ChainSnapshot{}
+	for _, chain := range current {
+		currentByID[chain.ID] = chain
+	}
+	frozenByID := map[uint]ChainSnapshot{}
+	for _, chain := range frozen {
+		frozenByID[chain.ID] = chain
+		now, exists := currentByID[chain.ID]
+		if !exists {
+			items = append(items, DriftItem{EntityType: DriftChain, EntityID: chain.ID, Code: chain.Code, Change: DriftRemoved, Detail: "certificate chain is no longer present"})
+			continue
+		}
+		details := []string{}
+		if chain.AnchorID != now.AnchorID {
+			details = append(details, fmt.Sprintf("trust_anchor_id %d -> %d", chain.AnchorID, now.AnchorID))
+		}
+		if chain.LeafSubject != now.LeafSubject {
+			details = append(details, "leaf_subject changed")
+		}
+		if !chain.ValidFrom.Equal(now.ValidFrom) {
+			details = append(details, "valid_from "+formatTime(chain.ValidFrom)+" -> "+formatTime(now.ValidFrom))
+		}
+		if !chain.ValidTo.Equal(now.ValidTo) {
+			details = append(details, "valid_to "+formatTime(chain.ValidTo)+" -> "+formatTime(now.ValidTo))
+		}
+		if chain.State != now.State {
+			details = append(details, "chain_state "+chain.State+" -> "+now.State)
+		}
+		if chain.ValidationValid != now.ValidationValid {
+			details = append(details, fmt.Sprintf("offline validation passed %t -> %t", chain.ValidationValid, now.ValidationValid))
+		}
+		if len(details) > 0 {
+			items = append(items, DriftItem{EntityType: DriftChain, EntityID: chain.ID, Code: chain.Code, Change: DriftModified, Detail: strings.Join(details, "; ")})
+		}
+	}
+	for _, chain := range current {
+		if _, exists := frozenByID[chain.ID]; !exists {
+			items = append(items, DriftItem{EntityType: DriftChain, EntityID: chain.ID, Code: chain.Code, Change: DriftAdded, Detail: "certificate chain was added after the snapshot was frozen"})
+		}
+	}
+	return items
+}
+
+func diffServices(frozen, current []ServiceSnapshot) []DriftItem {
+	items := []DriftItem{}
+	currentByID := map[uint]ServiceSnapshot{}
+	for _, service := range current {
+		currentByID[service.ID] = service
+	}
+	frozenByID := map[uint]ServiceSnapshot{}
+	for _, service := range frozen {
+		frozenByID[service.ID] = service
+		now, exists := currentByID[service.ID]
+		if !exists {
+			items = append(items, DriftItem{EntityType: DriftService, EntityID: service.ID, Code: service.Code, Change: DriftRemoved, Detail: "dependent service is no longer present"})
+			continue
+		}
+		details := []string{}
+		if service.ChainID != now.ChainID {
+			details = append(details, fmt.Sprintf("chain_id %d -> %d", service.ChainID, now.ChainID))
+		}
+		if !sameIDs(service.TrustAnchorIDs, now.TrustAnchorIDs) {
+			details = append(details, "client trust refs "+formatIDs(service.TrustAnchorIDs)+" -> "+formatIDs(now.TrustAnchorIDs))
+		}
+		if !sameIDs(service.DependencyIDs, now.DependencyIDs) {
+			details = append(details, "dependency edges "+formatIDs(service.DependencyIDs)+" -> "+formatIDs(now.DependencyIDs))
+		}
+		if service.Criticality != now.Criticality {
+			details = append(details, "criticality "+service.Criticality+" -> "+now.Criticality)
+		}
+		if service.State != now.State {
+			details = append(details, "service_state "+service.State+" -> "+now.State)
+		}
+		if len(details) > 0 {
+			items = append(items, DriftItem{EntityType: DriftService, EntityID: service.ID, Code: service.Code, Change: DriftModified, Detail: strings.Join(details, "; ")})
+		}
+	}
+	for _, service := range current {
+		if _, exists := frozenByID[service.ID]; !exists {
+			items = append(items, DriftItem{EntityType: DriftService, EntityID: service.ID, Code: service.Code, Change: DriftAdded, Detail: "dependent service was registered after the snapshot was frozen"})
+		}
+	}
+	return items
+}
+
+func sameIDs(first, second []uint) bool {
+	if len(first) != len(second) {
+		return false
+	}
+	for index := range first {
+		if first[index] != second[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func formatIDs(values []uint) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, fmt.Sprint(value))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+func formatTime(value time.Time) string { return value.UTC().Format(time.RFC3339) }

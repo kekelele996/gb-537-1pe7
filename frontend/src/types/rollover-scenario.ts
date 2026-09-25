@@ -74,3 +74,25 @@ export interface CreateRolloverScenarioInput {
   simulation_time: string
 }
 
+export type SnapshotDriftEntity = 'algorithm' | 'trust_anchor' | 'certificate_chain' | 'dependent_service'
+export type SnapshotDriftChange = 'added' | 'removed' | 'modified'
+
+export interface SnapshotDriftItem {
+  entity_type: SnapshotDriftEntity
+  entity_id?: number
+  code: string
+  change: SnapshotDriftChange
+  detail: string
+}
+
+export interface SnapshotDrift {
+  scenario_id: number
+  scenario_state: ScenarioState
+  historical: boolean
+  changed: boolean
+  frozen_hash: string
+  current_hash: string
+  changes: SnapshotDriftItem[]
+  checked_at: string
+}
+

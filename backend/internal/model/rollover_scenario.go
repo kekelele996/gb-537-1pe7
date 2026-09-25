@@ -25,12 +25,14 @@ type RolloverScenario struct {
 	CreatedByName        string      `gorm:"size:80;not null" json:"created_by_name"`
 	VerifiedBy           *uint       `json:"verified_by,omitempty"`
 	VerifiedByName       string      `gorm:"size:80" json:"verified_by_name"`
-	IdempotencyKey       string      `gorm:"uniqueIndex;size:128" json:"idempotency_key"`
-	ReplayVerified       bool        `gorm:"not null;default:false" json:"replay_verified"`
-	DurationMS           int64       `gorm:"not null;default:0" json:"duration_ms"`
-	RollbackRecord       string      `gorm:"type:text" json:"rollback_record"`
-	CreatedAt            time.Time   `gorm:"not null" json:"created_at"`
-	UpdatedAt            time.Time   `gorm:"not null" json:"updated_at"`
+	// IdempotencyKey is nullable so multiple drafts can coexist and a
+	// re-frozen scenario releases its previously bound simulation key.
+	IdempotencyKey *string   `gorm:"uniqueIndex;size:128" json:"idempotency_key,omitempty"`
+	ReplayVerified bool      `gorm:"not null;default:false" json:"replay_verified"`
+	DurationMS     int64     `gorm:"not null;default:0" json:"duration_ms"`
+	RollbackRecord string    `gorm:"type:text" json:"rollback_record"`
+	CreatedAt      time.Time `gorm:"not null" json:"created_at"`
+	UpdatedAt      time.Time `gorm:"not null" json:"updated_at"`
 }
 
 func (s RolloverScenario) ReviewerSeparated(userID uint) bool { return s.CreatedBy != userID }

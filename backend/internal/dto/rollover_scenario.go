@@ -63,6 +63,21 @@ type RolloverScenarioListResponse struct {
 	Size  int                        `json:"size"`
 }
 
+// SnapshotDriftResponse reports whether the assets frozen into a scenario
+// still match the currently stored anchors, chains, and service dependencies.
+// Verified scenarios keep their original snapshot and are reported as
+// historical records: drift is informational and re-freezing is rejected.
+type SnapshotDriftResponse struct {
+	ScenarioID    uint                  `json:"scenario_id"`
+	ScenarioState string                `json:"scenario_state"`
+	Historical    bool                  `json:"historical"`
+	Changed       bool                  `json:"changed"`
+	FrozenHash    string                `json:"frozen_hash"`
+	CurrentHash   string                `json:"current_hash"`
+	Changes       []algorithm.DriftItem `json:"changes"`
+	CheckedAt     time.Time             `json:"checked_at"`
+}
+
 func NewRolloverScenarioResponse(scenario model.RolloverScenario, now time.Time) RolloverScenarioResponse {
 	candidateIDs := []uint{}
 	affected := []algorithm.AffectedService{}

@@ -88,6 +88,24 @@ func (h *RolloverScenarioHandler) Transition(c *gin.Context) {
 	result, serviceErr := h.service.Transition(c.Request.Context(), id, request, actor, util.RequestID(c))
 	respond(c, http.StatusOK, result, serviceErr)
 }
+func (h *RolloverScenarioHandler) Drift(c *gin.Context) {
+	id, err := util.ParseUintParam(c, "id")
+	if err != nil {
+		util.Fail(c, err)
+		return
+	}
+	result, serviceErr := h.service.CheckDrift(c.Request.Context(), id)
+	respond(c, http.StatusOK, result, serviceErr)
+}
+func (h *RolloverScenarioHandler) Refreeze(c *gin.Context) {
+	id, err := util.ParseUintParam(c, "id")
+	if err != nil {
+		util.Fail(c, err)
+		return
+	}
+	result, serviceErr := h.service.Refreeze(c.Request.Context(), id, mustActor(c), util.RequestID(c))
+	respond(c, http.StatusOK, result, serviceErr)
+}
 func (h *RolloverScenarioHandler) Replay(c *gin.Context) {
 	id, err := util.ParseUintParam(c, "id")
 	if err != nil {

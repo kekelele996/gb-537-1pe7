@@ -109,6 +109,20 @@ func (s *AuditService) List(ctx context.Context, query repository.AuditQuery) (m
 }
 
 func buildSnapshot(name string, oldAnchorID, newAnchorID uint, overlapStart, overlapEnd, simulationTime time.Time, candidateIDs []uint, anchors []model.TrustAnchor, chains []model.CertificateChain, services []model.DependentService) (algorithm.Snapshot, error) {
+	snapshot, err := assembleSnapshot(name, oldAnchorID, newAnchorID, overlapStart, overlapEnd, simulationTime, candidateIDs, anchors, chains, services)
+	if err != nil {
+		return algorithm.Snapshot{}, err
+	}
+	if err := algorithm.ValidateSnapshot(snapshot); err != nil {
+		return algorithm.Snapshot{}, err
+	}
+	return snapshot, nil
+}
+
+// assembleSnapshot builds a snapshot from the current asset rows without
+// validating it, so drift checks can report assets that no longer satisfy the
+// frozen-input invariants (for example a deleted trust anchor).
+func assembleSnapshot(name string, oldAnchorID, newAnchorID uint, overlapStart, overlapEnd, simulationTime time.Time, candidateIDs []uint, anchors []model.TrustAnchor, chains []model.CertificateChain, services []model.DependentService) (algorithm.Snapshot, error) {
 	anchorSnapshots := make([]algorithm.AnchorSnapshot, 0, len(anchors))
 	for _, anchor := range anchors {
 		anchorSnapshots = append(anchorSnapshots, algorithm.AnchorSnapshot{ID: anchor.ID, Code: anchor.AnchorCode, State: anchor.CertificateState, NotBefore: anchor.NotBefore, NotAfter: anchor.NotAfter, Revoked: anchor.RevokedAt != nil})
@@ -134,8 +148,5 @@ func buildSnapshot(name string, oldAnchorID, newAnchorID uint, overlapStart, ove
 		serviceSnapshots = append(serviceSnapshots, algorithm.ServiceSnapshot{ID: service.ID, Code: service.ServiceCode, ChainID: service.ChainID, TrustAnchorIDs: trust, DependencyIDs: dependencies, Criticality: service.Criticality, State: service.ServiceState})
 	}
 	snapshot := algorithm.NewSnapshot(algorithm.ScenarioConfig{Name: name, OldAnchorID: oldAnchorID, NewAnchorID: newAnchorID, OverlapStart: overlapStart.UTC(), OverlapEnd: overlapEnd.UTC(), CandidateChainIDs: candidateIDs, SimulationTime: simulationTime.UTC()}, anchorSnapshots, chainSnapshots, serviceSnapshots)
-	if err := algorithm.ValidateSnapshot(snapshot); err != nil {
-		return algorithm.Snapshot{}, err
-	}
 	return snapshot, nil
 }

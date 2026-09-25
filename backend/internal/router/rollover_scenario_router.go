@@ -14,6 +14,8 @@ func RegisterRolloverScenarioRoutes(api *gin.RouterGroup, h *handler.RolloverSce
 	group.GET("/:id", middleware.RequirePermission(constants.PermissionRead), h.Get)
 	group.POST("/:id/simulate", middleware.RequirePermission(constants.PermissionScenarioRun), limit.Middleware("rollover-simulation"), h.Simulate)
 	group.POST("/:id/transition", middleware.RequireAnyPermission(constants.PermissionScenarioWrite, constants.PermissionScenarioVerify), h.Transition)
+	group.GET("/:id/drift", middleware.RequirePermission(constants.PermissionRead), h.Drift)
+	group.POST("/:id/refreeze", middleware.RequirePermission(constants.PermissionScenarioWrite), limit.Middleware("rollover-refreeze"), h.Refreeze)
 	group.POST("/:id/replay", middleware.RequirePermission(constants.PermissionScenarioRun), limit.Middleware("rollover-replay"), h.Replay)
 	group.GET("/:id/compare/:other_id", middleware.RequirePermission(constants.PermissionRead), h.Compare)
 }

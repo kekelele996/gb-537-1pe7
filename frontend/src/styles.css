@@ -233,6 +233,16 @@ button, input, textarea, select { letter-spacing: 0; }
 .broken-paths p { margin-top: 4px; color: #725a57; font-size: .67rem; line-height: 1.45; }
 .broken-paths .no-broken-paths { display: flex; align-items: center; gap: 7px; border-color: #b8cec2; background: #e8f0eb; color: var(--green); font-size: .75rem; }
 
+.scenario-title-badges { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.drift-change-list { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
+.drift-change-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px; font-size: .7rem; line-height: 1.45; }
+.drift-change-list .drift-entity { font-weight: 600; }
+.drift-change-list .drift-change { padding: 1px 7px; border-radius: 999px; font-size: .6rem; letter-spacing: .04em; }
+.drift-change-list .drift-added { background: #e8f0eb; color: var(--green); }
+.drift-change-list .drift-removed { background: #f5e9e7; color: #853935; }
+.drift-change-list .drift-modified { background: #f3ecde; color: #735623; }
+.drift-change-list .drift-detail { color: #5f6d66; overflow-wrap: anywhere; }
+
 .audit-register { border: 1px solid var(--mineral-3); background: var(--mineral-0); }
 .audit-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 15px; min-height: 67px; padding: 12px 15px; border-bottom: 1px solid var(--mineral-3); }
 .audit-toolbar > div { display: flex; align-items: center; gap: 8px; }

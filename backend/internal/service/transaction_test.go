@@ -117,15 +117,19 @@ func minimalScenario(t *testing.T, db *gorm.DB, name, inputHash, key, state stri
 			t.Fatal(err)
 		}
 	}
-	return model.RolloverScenario{Name: name, OldAnchorID: anchors[0].ID, NewAnchorID: anchors[1].ID, OverlapStart: now.Add(time.Hour), OverlapEnd: now.Add(2 * time.Hour), CandidateChainIDs: "[]", AlgorithmVersion: algorithm.Version, InputHash: inputHash, InputSnapshot: "{}", SimulationTime: now.Add(90 * time.Minute), AffectedServicesJSON: "[]", BrokenPathsJSON: "[]", PathEvidenceJSON: "[]", ScenarioState: state, Explanation: "test", CreatedBy: createdBy, CreatedByName: "operator", IdempotencyKey: key, CreatedAt: now, UpdatedAt: now}
+	scenario := model.RolloverScenario{Name: name, OldAnchorID: anchors[0].ID, NewAnchorID: anchors[1].ID, OverlapStart: now.Add(time.Hour), OverlapEnd: now.Add(2 * time.Hour), CandidateChainIDs: "[]", AlgorithmVersion: algorithm.Version, InputHash: inputHash, InputSnapshot: "{}", SimulationTime: now.Add(90 * time.Minute), AffectedServicesJSON: "[]", BrokenPathsJSON: "[]", PathEvidenceJSON: "[]", ScenarioState: state, Explanation: "test", CreatedBy: createdBy, CreatedByName: "operator", CreatedAt: now, UpdatedAt: now}
+	if key != "" {
+		scenario.IdempotencyKey = &key
+	}
+	return scenario
 }
 
 func TestSimulationIdempotencyKeyCannotCrossScenarioBoundary(t *testing.T) {
 	db := newScenarioTestDB(t)
-	first := persistScenario(t, db, minimalScenario(t, db, "first", "hash-first", "shared-key", "simulated", 7, 0))
+	persistScenario(t, db, minimalScenario(t, db, "first", "hash-first", "shared-key", "simulated", 7, 0))
 	second := persistScenario(t, db, minimalScenario(t, db, "second", "hash-second", "", "draft", 7, time.Minute))
 	service := NewRolloverScenarioService(repository.NewRolloverScenarioRepository(db), nil, nil, nil, repository.NewAuditRepository(db), repository.NewTransactionManager(db))
-	_, reused, err := service.Simulate(context.Background(), second.ID, first.IdempotencyKey, util.Actor{UserID: 7, Username: "operator", Role: string(constants.RolePKIOperator)}, "request-cross-key")
+	_, reused, err := service.Simulate(context.Background(), second.ID, "shared-key", util.Actor{UserID: 7, Username: "operator", Role: string(constants.RolePKIOperator)}, "request-cross-key")
 	if err == nil || reused {
 		t.Fatalf("cross-scenario key got reused=%v err=%v", reused, err)
 	}

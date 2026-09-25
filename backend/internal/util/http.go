@@ -22,6 +22,8 @@ const (
 	CodeStateTransition  = "INVALID_STATE_TRANSITION"
 	CodeIdempotency      = "IDEMPOTENCY_CONFLICT"
 	CodeReviewerConflict = "REVIEWER_SEPARATION_REQUIRED"
+	CodeSnapshotDrift    = "SNAPSHOT_DRIFT_DETECTED"
+	CodeHistoricalRecord = "HISTORICAL_RECORD_LOCKED"
 	CodeInternal         = "INTERNAL_ERROR"
 )
 
